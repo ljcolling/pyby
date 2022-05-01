@@ -46,67 +46,18 @@ fn gen_data(
     max_n: usize,
     seed: Option<u64>,
 ) -> Vec<(usize, f64, i32, Option<f64>, f64, f64, f64)> {
-    // generate the random numbers
     
-    // let x = make_random(effsize, n, seed);
 
     make_random(effsize, n, seed)
-    // let mut list0 = Vec::new();
-    // 
-    // if let Ok(lines) = read_lines("/Users/lc663/GitHub/pyby/1_file.dat") {
-    //     for line in lines {
-    //         if let Ok(item) = line {
-    //             list0.push(item.parse::<f64>().unwrap());
-    //         }
-    //     }
-    // }
-
-    // if let Ok(lines) = read_lines("/Users/lc663/GitHub/pyby/2_file.dat") {
-    //     for line in lines {
-    //         if let Ok(item) = line {
-    //             list0.push(item.parse::<f64>().unwrap());
-    //         }
-    //     }
-    // }
-    // let x = list0;
-    // // group into runs
-    // // let max_n: usize = 200;
-    // // let mut data_grouped = Vec::new();
-    // // for chunk in &x.into_iter().chunks(max_n) {
-    // //     data_grouped.push(chunk.collect_vec())
-    // //     // data_grouped.push(chunk.scan(0f64, |state, x| {
-    // //     //     *state = *state + x;
-    // //     //     Some(*state)
-    // //     //     }).collect_vec());
-
-    // // }
-    // let data_grouped: Vec<&[f64]> = x.chunks(max_n).collect();
     .chunks(max_n)
     .collect::<Vec<&[f64]>>()
-    // let data_grouped: Vec<Vec<f64>> = x.chunks(max_n).map(|x| x.to_vec()).collect();
-    // process each run
-    // let runs = n / max_n;
-    // let mut iter = Vec::new();
-    // for i in 0..runs {
-    // iter.push(data_grouped[i].iter().scan(0f64, |state, x| {
-    //     *state = *state + x;
-    //     Some(*state)
-    //     }).collect_vec());
-    // };
-    //
-
-    // let results: Vec<(usize, i32, f64, f64, f64)> = data_grouped
-    // data_grouped
         .into_par_iter()
         .enumerate()
         .map(|(i, group)| {
-            // let mut k = 0f64;
-            // let mut S = 0f64;
             group
                 .iter()
                 .scan(
                     (0f64, 0f64, 0f64),
-            #[inline(always)]
                     |(count, mean, squared_distances), new_value| {
                         // Use Welford's method to work out the running mean and sd
                         // see https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
@@ -135,13 +86,8 @@ fn gen_data(
                 .collect_vec()
         })
         .flatten()
-        .filter(|(_, n, _, _, _)| n >= &2) // filter out initial result
-        // .collect()
-    // return results
-    // results
-        // .filter(|(_, n, _, _, _)| n % &10 == 0 && n != &10) // filter out initial result
-        // .filter(|(_, n, _, _, _)| n != &1) // filter out initial result
-        // .into_par_iter()
+        .filter(|(_, n, _, _, _)| (n >= &2) || (*n % 10) == 0) // filter out initial result
+        .into_par_iter()
         .map(
             #[inline(always)]
             |(id, n, _, mean, sd)| {
