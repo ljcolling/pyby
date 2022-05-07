@@ -184,6 +184,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dict_derive"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6207f46b33b2bf00858b0edb03d188d31a46fedfde4aa53a27d69fe25acd80cf"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "either"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -408,6 +419,7 @@ dependencies = [
 name = "pyby"
 version = "0.1.0"
 dependencies = [
+ "dict_derive",
  "float-cmp",
  "gkquad",
  "itertools",

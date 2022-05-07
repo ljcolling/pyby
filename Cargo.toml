@@ -19,6 +19,7 @@ gkquad = "0.0.1"
 r_mathlib = {path = "/Users/lc663/GitHub/rust_stats/"}
 float-cmp = "0.9.0"
 # tikv-jemallocator = "0.4.0" 
+dict_derive = "0.4.0"
 
 [source.crates-io]
 replace-with = "vendored-sources"

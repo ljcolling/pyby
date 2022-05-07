@@ -16,11 +16,13 @@ use dict_derive::{FromPyObject, IntoPyObject};
 // use std::fs::File;
 // use std::io::{self, BufRead};
 // use std::path::Path;
+/// Formats the sum of two numbers as string.
 
 #[derive(FromPyObject, IntoPyObject, Debug)]
 struct Prior {
     name: String,
     params: Vec<f64>,
+    // limits: Vec<Option<f64>>,
 }
 
 /// simulate
@@ -35,38 +37,29 @@ fn bf_sim(
     alternative: &str,
     reps: i32,
     seed: Option<u64>,
-) -> Option<Vec<(usize, f64, i32, Option<f64>, f64, f64, f64)>> {
-    match comp {
-        "paired_t" => {
-            return Some(bf_sim_paired(
-                effsize,
-                min_n,
-                max_n,
-                step_size,
-                reps,
-                seed,
-                prior,
-                alternative,
-            ))
-        }
-        _ => None,
-    }
+) -> Vec<(usize, f64, i32, Option<f64>, f64, f64, f64)> {
+
+    
+   
+   return bf_sim_paired(effsize, min_n, max_n,step_size, reps, seed, prior, alternative)
+    
+
 }
 
 fn create_prior(prior: &Prior, alternative: &str) -> Box<impl Fn(f64) -> f64> {
+
     let (ll, ul) = match alternative {
         "two.sided" => (None, None),
-        "greater" => (Some(0.), None),
-        "less" => (None, Some(0.)),
-        _ => (Some(0.), Some(0.)),
+        _ => (Some(0.), Some(0.))
     };
-
+    
     let prior = match prior.name.as_str() {
-        "cauchy" => cauchy_prior(prior.params[0], prior.params[1], ll, ul),
-        _ => cauchy_prior(0., 0., Some(0.), Some(0.)),
+     "cauchy" => cauchy_prior(prior.params[0], prior.params[1], ll, ul),
+    _ => cauchy_prior(0., 0., Some(0.), Some(0.))
     };
 
-    return prior;
+    return prior
+
 }
 
 /// Generate data
@@ -79,8 +72,9 @@ fn bf_sim_paired(
     reps: i32,
     seed: Option<u64>,
     prior: Prior,
-    alternative: &str,
+    alternative: &str
 ) -> Vec<(usize, f64, i32, Option<f64>, f64, f64, f64)> {
+
     make_random(effsize, max_n * reps, seed)
         .into_par_iter()
         .chunks(max_n as usize)
@@ -153,13 +147,7 @@ pub fn one_sample_t(t: f64, n: i32, _tail: i16) -> f64 {
 //     return *block
 // }
 #[inline(always)]
-fn bf_onesample_default_t(
-    mean: f64,
-    sd: f64,
-    n: i32,
-    prior: &Prior,
-    alternative: &str,
-) -> Option<f64> {
+fn bf_onesample_default_t(mean: f64, sd: f64, n: i32, prior: &Prior, alternative: &str ) -> Option<f64> {
     // let (lb, ub) = tail_to_bounds(0.0);
     let d = mean / sd;
     // let t = mean / (sd / (n as f64).sqrt());
@@ -240,6 +228,7 @@ fn cauchy_auc(location: f64, scale: f64, ll: Option<f64>, ul: Option<f64>) -> f6
         }
     }
 
+    // return 1.
 }
 
 #[inline(always)]
@@ -265,6 +254,9 @@ fn t_prior(location: f64, scale: f64, df: f64, lb: f64, ub: f64) -> Box<impl Fn(
         range_area_studentt(location, scale, df, lb, ub)
     };
 
+    // return Box::new(move |x: f64| students_t_pdf((x - location) / scale, df, false) * k);
+    // let dist = StudentsT::new(location, scale, df).unwrap();
+    // return Box::new(move |x: f64| dist.pdf(x) * k);
     return Box::new(move |x: f64| dcauchy(x, location, scale, false) * k);
 }
 
@@ -397,18 +389,8 @@ mod tests {
     #[test]
     fn test1() {
         let alternative = "two.sided";
-        let prior = Prior {
-            name: "cauchy".to_string(),
-            params: vec![0., (2f64).sqrt() / 2.0],
-        };
-        let got = bf_onesample_default_t(
-            0.508114037354055,
-            1.06850369859537,
-            140,
-            &prior,
-            alternative,
-        )
-        .unwrap();
+        let prior = Prior{name: "cauchy".to_string(), params: vec![0., (2f64).sqrt()/2.0],};
+        let got = bf_onesample_default_t(0.508114037354055, 1.06850369859537, 140, &prior, alternative).unwrap();
         let want = (113731.66890204486844595522 as f64).ln();
         assert!(
             approx_eq!(f64, got, want, epsilon = TOL),
@@ -420,20 +402,10 @@ mod tests {
 
     #[test]
     fn test2() {
-        let prior = Prior {
-            name: "cauchy".to_string(),
-            params: vec![0., (2f64).sqrt() / 2.0],
-        };
+        let prior = Prior{name: "cauchy".to_string(), params: vec![0., (2f64).sqrt()/2.0],};
         let alternative = "two.sided";
         let want = (304475.15582726168213412166 as f64).ln();
-        let got = bf_onesample_default_t(
-            0.508114037354055,
-            1.06850369859537,
-            150,
-            &prior,
-            alternative,
-        )
-        .unwrap();
+        let got = bf_onesample_default_t(0.508114037354055, 1.06850369859537, 150, &prior, alternative ).unwrap();
         assert!(
             approx_eq!(f64, got, want, epsilon = TOL),
             "got = {}; want = {}",
