@@ -3,7 +3,6 @@ name = "pyby"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "pyby"
 crate-type = ["cdylib"]
@@ -15,16 +14,7 @@ rayon = "1.5.2"
 itertools = "0.10.3"
 statrs = "0.6.0"
 gkquad = "0.0.4"
-# mathru = "0.11"
-r_mathlib = {path = "/Users/lc663/GitHub/rust_stats/"}
+r_mathlib = {path = "./rust_stats/"}
 float-cmp = "0.9.0"
 
 dict_derive = "0.4.0"
-# bfrs = { path = "../bfrs" }
-
-# [source.crates-io]
-# replace-with = "vendored-sources"
-
-# [source.vendored-sources]
-# directory = "vendor"
-
