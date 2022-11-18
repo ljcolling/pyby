@@ -60,7 +60,7 @@ print(f"Simulation performed in {toc - tic:0.4f} seconds")
 print(df)
 ```
 
-```bash
+```md
 Simulation performed in 1.6360 seconds
 |       | id   | true.ES  | n    | logBF    | emp.ES    | statistic | p.value      |
 |-------|------|--------- |------|-----------|----------|-----------|--------------|
