@@ -1,4 +1,5 @@
-fn welfords(
+
+pub fn welfords(
     (i, count, mean, squared_distances): &mut (usize, f64, f64, f64),
     new_value: &f64,
 ) -> Option<(usize, i32, f64, f64, f64)> {
