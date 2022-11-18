@@ -8,9 +8,9 @@ df = pyby.bf_sim(
     0.5,
     "t.paired",
     {"family": "Cauchy", "params": [0, 0.707], "alternative": "two.sided"},
-    sampling_rule = {"n_min": 10, "n_max": 200, "step_size": 5},
+    sampling_rule = {"n_min": 50, "n_max": 300, "step_size": 5},
     alternative = "two.sided",
-    reps = 100,
+    reps = 1000,
     seed = 1600,
 )
 

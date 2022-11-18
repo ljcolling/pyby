@@ -13,6 +13,7 @@ use crate::components::priors::Function;
 use itertools::Itertools;
 use gkquad::single::Integrator;
 
+use rayon::prelude::*;
 use std::f64::{INFINITY, NEG_INFINITY};
 
 pub fn bf_sim_paired(
@@ -27,8 +28,8 @@ pub fn bf_sim_paired(
     // make_random1(effsize, n_max , reps, seed)
     // let d: Vec<(usize, f64, i32, Option<f64>, f64, f64, f64)> =
     let d: Vec<SimRow> = make_random(effsize, n_max * reps, seed)
+        .into_par_iter()
         .chunks(n_max as usize)
-        // .iter()
         .enumerate()
         .map(|(i, group)| {
             group
