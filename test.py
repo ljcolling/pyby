@@ -3,15 +3,15 @@ import time
 import pandas as pd
 
 tic = time.perf_counter()
+
 df = pyby.bf_sim(
     0.5,
-    "paired_t",
-    {"name": "cauchy", "params": [0, 0.707]},
-    10,
-    300,
-    10,
-    "two.sided",
-    1000,
+    "t.paired",
+    {"family": "Cauchy", "params": [0, 0.707], "alternative": "two.sided"},
+    sampling_rule = {"n_min": 10, "n_max": 200, "step_size": 5},
+    alternative = "two.sided",
+    reps = 100,
+    seed = 1600,
 )
 
 if df is not None:
@@ -23,3 +23,7 @@ if df is not None:
     print(df)
 else:
     Exception("Error")
+
+
+
+

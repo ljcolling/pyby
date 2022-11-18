@@ -14,15 +14,17 @@ rand = "0.6.5"
 rayon = "1.5.2"
 itertools = "0.10.3"
 statrs = "0.6.0"
-gkquad = "0.0.1"
+gkquad = "0.0.4"
 # mathru = "0.11"
 r_mathlib = {path = "/Users/lc663/GitHub/rust_stats/"}
 float-cmp = "0.9.0"
-# tikv-jemallocator = "0.4.0" 
+
 dict_derive = "0.4.0"
+# bfrs = { path = "../bfrs" }
 
-[source.crates-io]
-replace-with = "vendored-sources"
+# [source.crates-io]
+# replace-with = "vendored-sources"
 
-[source.vendored-sources]
-directory = "vendor"
+# [source.vendored-sources]
+# directory = "vendor"
+

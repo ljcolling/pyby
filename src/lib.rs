@@ -1,3 +1,5 @@
+
+use dict_derive::{FromPyObject, IntoPyObject};
 use gkquad::single::algorithm::QAGS;
 use gkquad::single::Integrator;
 use itertools::Itertools;
@@ -9,204 +11,328 @@ use r_mathlib::students_t_cdf;
 use rand::distributions::Normal as NormalRand;
 use rand::prelude::*;
 use rand::rngs::SmallRng;
+// use rand::thread_rng;
+use itertools::izip;
+use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use std::f64::{INFINITY, NEG_INFINITY};
+use itertools::enumerate;
 
-use dict_derive::{FromPyObject, IntoPyObject};
-// use std::fs::File;
-// use std::io::{self, BufRead};
-// use std::path::Path;
+mod components;
+
+use crate::components::priors::Prior;
+use crate::components::priors::Function;
+use crate::components::priors::cauchy_auc;
 
 #[derive(FromPyObject, IntoPyObject, Debug)]
-struct Prior {
-    name: String,
-    params: Vec<f64>,
+struct SamplingRule {
+    n_min: i32,
+    n_max: i32,
+    step_size: i32,
 }
 
-/// simulate
+impl SamplingRule  {
+    fn unpack(&self) -> (i32, i32, i32) {
+        (self.n_min, self.n_max, self.step_size)
+    }
+}
+
+
+
+/// bf_sim(effsize, comp, prior, min_n, max_n, step_size, alternative, reps, seed)
+/// ---
+/// Parameters:
+///     effsize: The effect size
+///     comp: Type of comparison. Either "t.paired" or "between_t"
+///     prior:
 #[pyfunction]
+#[pyo3(text_signature = "(effsize, comp, prior, sampling_rule, alternative, reps, seed)")]
 fn bf_sim(
     effsize: f64,
     comp: &str,
     prior: Prior,
-    min_n: i32,
-    max_n: i32,
-    step_size: i32,
+    sampling_rule: SamplingRule,
     alternative: &str,
     reps: i32,
     seed: Option<u64>,
-) -> Option<Vec<(usize, f64, i32, Option<f64>, f64, f64, f64)>> {
-    match comp {
-        "paired_t" => {
-            return Some(bf_sim_paired(
-                effsize,
-                min_n,
-                max_n,
-                step_size,
-                reps,
-                seed,
-                prior,
-                alternative,
-            ))
-        }
+) -> Vec<(usize, f64, i32, Option<f64>, f64, f64, f64)> {
+    let d = match comp {
+        "t.paired" => Some(bf_sim_paired(
+            effsize,
+            sampling_rule,
+            reps,
+            seed,
+            prior,
+            alternative,
+        )),
         _ => None,
+    };
+
+    d.unwrap().table()
+}
+
+impl SimTable {
+    fn table (self) -> Vec<(usize, f64, i32, Option<f64>, f64, f64, f64)> {
+
+    let mut id = Vec::new();
+    let mut effsize = Vec::new();
+    let mut n = Vec::new();
+    let mut bf = Vec::new();
+    let mut emp_es = Vec::new();
+    let mut t = Vec::new();
+    let mut pvalue = Vec::new();
+
+    self.rows.into_iter().for_each(|x| {
+        id.push(x.id);
+        effsize.push(x.effsize);
+        n.push(x.n);
+        bf.push(x.bf);
+        emp_es.push(x.emp_es);
+        t.push(x.t);
+        pvalue.push(x.pvalue);
+
+    });
+
+    izip!(id, effsize, n, bf, emp_es, t, pvalue).collect_vec()
+
     }
 }
 
-fn create_prior(prior: &Prior, alternative: &str) -> Box<impl Fn(f64) -> f64> {
-    let (ll, ul) = match alternative {
-        "two.sided" => (None, None),
-        "greater" => (Some(0.), None),
-        "less" => (None, Some(0.)),
-        _ => (Some(0.), Some(0.)),
-    };
 
-    let prior = match prior.name.as_str() {
-        "cauchy" => cauchy_prior(prior.params[0], prior.params[1], ll, ul),
-        _ => cauchy_prior(0., 0., Some(0.), Some(0.)),
-    };
 
-    return prior;
-}
-
-/// Generate data
-// #[pyfunction]
 fn bf_sim_paired(
     effsize: f64,
-    min_n: i32,
-    max_n: i32,
-    step_size: i32,
+    sampling_rule: SamplingRule,
     reps: i32,
     seed: Option<u64>,
     prior: Prior,
     alternative: &str,
-) -> Vec<(usize, f64, i32, Option<f64>, f64, f64, f64)> {
-    make_random(effsize, max_n * reps, seed)
-        .into_par_iter()
-        .chunks(max_n as usize)
-        // .collect::<Vec<&[f64]>>()
-        // .into_par_iter()
-        .enumerate()
-        .map(|(i, group)| {
-            group
-                .iter()
-                .scan(
-                    (0f64, 0f64, 0f64),
-                    |(count, mean, squared_distances), new_value| {
-                        // Use Welford's method to work out the running mean and sd
-                        // see https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
-                        *count += 1f64;
-                        let delta = new_value - *mean;
-                        *mean = *mean + (delta / *count);
-                        let delta2 = new_value - *mean;
-                        *squared_distances = *squared_distances + (delta * delta2);
-                        let sd = (*squared_distances / (*count - 1f64)).sqrt();
-                        // let bf = if *count <  2.0 {
-                        //     Some(0f64)
-                        // } else {
-                        //     bayesfactor(*mean, sd, *count as i32)
-                        // };
+) -> SimTable {
+    let (n_min, n_max, step_size) = sampling_rule.unpack();
+    // make_random1(effsize, n_max , reps, seed)
+    // let d: Vec<(usize, f64, i32, Option<f64>, f64, f64, f64)> =
+    let d: Vec<SimRow> =
+        make_random(effsize, n_max * reps, seed)
+            .chunks(n_max as usize)
+            // .iter()
+            .enumerate()
+            .map(|(i, group)| {
+                group
+                    .iter()
+                    .scan((i, 0f64, 0f64, 0f64), welfords)
+                    .collect_vec()
+            })
+            .flatten()
+            .filter(|(_, n, _, _, _)| (n >= &n_min) && (*n % step_size) == 0)
+            .map(
+                #[inline(always)]
+                |(id, n, _, mean, sd)| {
+                    let bf = if n < 2 {
+                        Some(0f64)
+                    } else {
+                        bf_onesample_default_t((mean / sd) as f64, n, &prior, alternative)
+                    };
+                    let emp_es = mean / sd;
+                    let se = sd / (n as f64).sqrt();
+                    let t = mean / se;
+                    let pvalue = one_sample_t(t, n, 0);
+                    SimRow{id, effsize, n, bf, emp_es, t, pvalue}
+                    // (id, effsize, n, bf, emp_es, t, pvalue)
+                },
+            )
+            .collect();
 
-                        Some((
-                            i + 1usize,        // group
-                            *count as i32,     // item
-                            *new_value as f64, // current value
-                            *mean,             // running mean
-                            sd,                // running sd
-                                               // bf,
-                        ))
-                    },
-                )
-                .collect_vec()
-        })
-        .flatten()
-        // .into_par_iter()
-        .filter(|(_, n, _, _, _)| (n >= &min_n) && (*n % step_size) == 0) // filter out initial result
-        .map(
-            #[inline(always)]
-            |(id, n, _, mean, sd)| {
-                let bf = if n < 2 {
-                    Some(0f64)
-                } else {
-                    bf_onesample_default_t(mean, sd, n, &prior, alternative)
-                };
-
-                let emp_es = mean / sd;
-                let se = sd / (n as f64).sqrt();
-                let t = mean / se;
-                let pvalue = one_sample_t(t, n, 0);
-                (id, effsize, n, bf, emp_es, t, pvalue)
-            },
-        )
-        .collect()
+    SimTable{rows: d.into_iter().collect()}
 }
 
-#[inline]
+
+#[derive(Debug)]
+struct SimRow {
+    id: usize,
+    effsize: f64,
+    n: i32,
+    bf: Option<f64>,
+    emp_es: f64,
+    t: f64,
+    pvalue: f64,
+}
+
+struct SimTable {
+    rows: Vec<SimRow>
+}
+
+#[derive(Debug)]
+struct PairedSim {
+    id: Vec<usize>,
+    effsize: Vec<f64>,
+    n: Vec<i32>,
+    bf: Vec<Option<f64>>,
+    emp_es: Vec<f64>,
+    t: Vec<f64>,
+    pvalue: Vec<f64>,
+}
+impl PairedSim {
+    fn new() -> PairedSim {
+        PairedSim {
+            id: Vec::new(),
+            effsize: Vec::new(),
+            n: Vec::new(),
+            bf: Vec::new(),
+            emp_es: Vec::new(),
+            t: Vec::new(),
+            pvalue: Vec::new(),
+        }
+    }
+}
+impl FromIterator<(usize, f64, i32, Option<f64>, f64, f64, f64)> for PairedSim {
+    fn from_iter<I: IntoIterator<Item = (usize, f64, i32, Option<f64>, f64, f64, f64)>>(
+        iter: I,
+    ) -> Self {
+        let mut c = PairedSim::new();
+
+        for item in iter {
+            c.id.push(item.0);
+            c.effsize.push(item.1);
+            c.n.push(item.2);
+            c.bf.push(item.3);
+            c.emp_es.push(item.4);
+            c.t.push(item.5);
+            c.pvalue.push(item.6);
+        }
+
+        c
+    }
+}
+
+
 pub fn one_sample_t(t: f64, n: i32, _tail: i16) -> f64 {
     2f64 * students_t_cdf(t, (n - 1) as f64, false, false)
 }
 
-// fn increment_block(i: usize, block : &mut u32, max_n: usize) -> u32 {
-//     if i % max_n == 0 {
-//         *block = *block + 1u32;
-//     };
-//     return *block
-// }
+#[pyfunction]
+#[pyo3(text_signature = "(effsize, n_min, n_max, step_size, reps, seed)")]
+fn bf_sim_independent(
+    effsize: f64,
+    n_min: i32,
+    n_max: i32,
+    step_size: i32,
+    reps: i32,
+    seed: Option<u64>,
+    // prior: Prior,
+    // alternative: &str,
+) -> Vec<(usize, i32, f64, f64, f64, f64, f64, f64, f64)> {
+    let ran1: Vec<(usize, i32, f64, f64, f64)> = make_random(effsize, n_max * reps, seed)
+        .into_par_iter()
+        .chunks(n_max as usize)
+        .enumerate()
+        .map(|(i, group)| {
+            group
+                .iter()
+                .scan((i, 0f64, 0f64, 0f64), welfords)
+                .collect_vec()
+        })
+        .flatten()
+        .filter(|(_, n, _, _, _)| (n >= &n_min) && (*n % step_size) == 0)
+        .collect();
+
+    let ran2: Vec<(usize, i32, f64, f64, f64)> = make_random(0.0, n_max * reps, seed)
+        .into_par_iter()
+        .chunks(n_max as usize)
+        .enumerate()
+        .map(|(i, group)| {
+            group
+                .iter()
+                .scan((i, 0f64, 0f64, 0f64), welfords)
+                .collect_vec()
+        })
+        .flatten()
+        .filter(|(_, n, _, _, _)| (n >= &n_min) && (*n % step_size) == 0)
+        .collect();
+
+    ran1.into_par_iter()
+        .zip(ran2)
+        .map(|((group, n, value1, m1, s1), (_, _, value2, m2, s2))| {
+            // calculate the bf value and structure the output here
+            let d = between_d(m1, m2, s1, s2, n as f64);
+            (group, n, value1, value2, m1, m2, s1, s2, d)
+        })
+        .collect::<Vec<(usize, i32, f64, f64, f64, f64, f64, f64, f64)>>()
+}
+
+
+fn welfords(
+    (i, count, mean, squared_distances): &mut (usize, f64, f64, f64),
+    new_value: &f64,
+) -> Option<(usize, i32, f64, f64, f64)> {
+    // Use Welford's method to work out the running mean and sd
+    *count += 1f64;
+    let delta = new_value - *mean;
+    *mean += delta / *count;
+    let delta2 = new_value - *mean;
+    *squared_distances += delta * delta2;
+    let sd = (*squared_distances / (*count - 1f64)).sqrt();
+
+    Some((
+        *i,
+        *count as i32,     // item
+        *new_value as f64, // current value
+        *mean,             // running mean
+        sd,                // running sd
+                           // bf,
+    ))
+}
+
+
 #[inline(always)]
-fn bf_onesample_default_t(
-    mean: f64,
-    sd: f64,
-    n: i32,
-    prior: &Prior,
-    alternative: &str,
-) -> Option<f64> {
-    // let (lb, ub) = tail_to_bounds(0.0);
-    let d = mean / sd;
-    // let t = mean / (sd / (n as f64).sqrt());
-    // if t > 10f64 {
-    //     return Some(1000.0);
-    // }
+fn bf_onesample_default_t(d: f64, n: i32, prior: &Prior, alternative: &str) -> Option<f64> {
+    // let d = mean / sd;
     let likelihood = noncentral_d_likelihood(d, n as f64);
 
-    let prior = create_prior(&prior, alternative);
+    let h1_prior = prior.function(alternative);
     let null = likelihood(0.0);
-    // let name = String::from("student_t");
-    // let params = vec![0.0, 2f64.sqrt() / 2f64, 1.0, lb, ub];
-    // let prior = t_prior_one_tailed(location, scale, df, lb, ub);
-    // let prior = make_prior("student_t", params);
-    // let prior = cauchy_prior(0., 2f64.sqrt() / 2f64, None, None);
-    let h1 = create_predictive(likelihood, prior);
-    // .max_iters(100)
-    // .points(&[0.])
-    // let mut config = IntegrationConfig::default();
-    // config.limit = 1000000;
-    // config.tolerance = AbsAndRel(1e-9, 1e-9);
-    // let alt = integral_with_config(|x: f64| h1(x), lb..ub, config).estimate();
-    let alt = Integrator::new(|x: f64| h1(x))
-        .algorithm(QAGS::new())
-        // .max_iters(100)
-        // .points(&[0.])
+    let h1 = create_predictive(likelihood, h1_prior);
+    let alt = Integrator::new(h1)
+        // .algorithm(QAGS::new())
         .run(NEG_INFINITY..INFINITY)
         .estimate()
         .unwrap();
-
-    // match alt {
-    //     Err(_) => return None,
-    //     _ => return Some(alt.unwrap() / null ),
-    // };
     Some((alt / null).ln())
 }
 
-// /// A Python module implemented in Rust.
+
 #[pymodule]
 fn pyby(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bf_sim, m)?)?;
-
+    m.add_function(wrap_pyfunction!(bf_sim_independent, m)?)?;
+    m.add_function(wrap_pyfunction!(make_random2, m)?)?;
     Ok(())
 }
 
-// Generate a bunch of random numbers
+#[pyfunction]
+fn make_random2() -> Vec<f64> {
+    let seed = Some(123);
+    let mut rng = match seed {
+        None => SmallRng::from_entropy(),
+        Some(seed) => SmallRng::seed_from_u64(seed),
+    };
+    // StandardNormal.sample_iter(&mut rng).take(n).collect()
+    let sizes = vec![1., 2., 3.];
+    let mut sizes_ret = sizes.repeat(1000 / 3);
+    sizes_ret.shuffle(&mut rng);
+    sizes_ret
+        .iter()
+        .map(|s: &f64| {
+            NormalRand::new(*s, 1.0)
+                .sample_iter(&mut rng)
+                .take(100 as usize)
+                .collect_vec()
+        })
+        .flatten()
+        .collect_vec()
 
+}
+
+// Generate a bunch of random numbers
 #[inline(always)]
 fn make_random(effsize: f64, n: i32, seed: Option<u64>) -> Vec<f64> {
     // If there's no seed then seed from entropy
@@ -221,6 +347,47 @@ fn make_random(effsize: f64, n: i32, seed: Option<u64>) -> Vec<f64> {
         .collect()
 }
 
+fn make_random1(effsize: f64, n: i32, reps: i32, seed: Option<u64>) -> Vec<f64> {
+    // If there's no seed then seed from entropy
+    let mut rng = match seed {
+        None => SmallRng::from_entropy(),
+        Some(seed) => SmallRng::seed_from_u64(seed),
+    };
+    // StandardNormal.sample_iter(&mut rng).take(n).collect()
+    let sizes = vec![effsize].repeat(reps as usize);
+    sizes
+        .iter()
+        .map(|s: &f64| {
+            NormalRand::new(*s, 1.0)
+                .sample_iter(&mut rng)
+                .take(n as usize)
+                .collect_vec()
+        })
+        .flatten()
+        .collect_vec()
+}
+
+fn between_d(m1: f64, m2: f64, s1: f64, s2: f64, n: f64) -> f64 {
+    let md_diff = m1 - m2;
+    let sd_pooled = sd_pooled(s1, s2, n);
+    let d = md_diff / sd_pooled;
+    return d;
+}
+
+fn sd_pooled(s1: f64, s2: f64, n: f64) -> f64 {
+    ((((n - 1.0) * s1.powi(2)) + ((n - 1.0) * s2.powi(2))) / (n + n - 2.0)).sqrt()
+}
+
+fn between_t(m1: f64, m2: f64, s1: f64, s2: f64, n: f64) -> (f64, f64, f64) {
+    let md_diff = m1 - m2;
+    let sd_pooled = sd_pooled(s1, s2, n);
+
+    let var_pooled = sd_pooled.powi(2);
+    let t = md_diff / ((var_pooled / n) + (var_pooled / n)).sqrt();
+    let df = n + n - 2.0;
+    return (t, df, 0.0);
+}
+
 /// here is the stuff that will get moved to a library
 
 #[inline(always)]
@@ -229,105 +396,12 @@ fn noncentral_d_likelihood(d: f64, n: f64) -> impl Fn(f64) -> f64 {
 }
 
 #[inline(always)]
-fn cauchy_auc(location: f64, scale: f64, ll: Option<f64>, ul: Option<f64>) -> f64 {
-    match (ll, ul) {
-        (None, None) => return 1.,
-        (Some(_), None) => return pcauchy(ll.unwrap(), location, scale, false, false),
-        (None, Some(_)) => return pcauchy(ul.unwrap(), location, scale, true, false),
-        (Some(_), Some(_)) => {
-            1.0 - ((1.0 - pcauchy(ll.unwrap(), location, scale, false, false))
-                + (1.0 - pcauchy(ul.unwrap(), location, scale, true, false)))
-        }
-    }
 
-}
 
-#[inline(always)]
-fn cauchy_prior(
-    location: f64,
-    scale: f64,
-    ll: Option<f64>,
-    ul: Option<f64>,
-) -> Box<impl Fn(f64) -> f64> {
-    // let k = 1. / ((1. - pcauchy(location, scale, ll, true, false)) -
-    // (1. - pcauchy(location, scale, ul, true, true)));
-
-    let k = 1.0 / cauchy_auc(location, scale, ll, ul);
-
-    return Box::new(move |x: f64| dcauchy(x, location, scale, false) * k);
-}
-
-#[inline(always)]
-fn t_prior(location: f64, scale: f64, df: f64, lb: f64, ub: f64) -> Box<impl Fn(f64) -> f64> {
-    let k = if lb == NEG_INFINITY && ub == INFINITY {
-        1f64
-    } else {
-        range_area_studentt(location, scale, df, lb, ub)
-    };
-
-    return Box::new(move |x: f64| dcauchy(x, location, scale, false) * k);
-}
-
-// stats::dt((x - mean) / sd, df, ncp = ncp, log = FALSE) / sd
-#[inline(always)]
-fn range_area_studentt(location: f64, scale: f64, df: f64, ll: f64, ul: f64) -> f64 {
-    if location >= 0f64 {
-        if ll == 0.0 && ul == INFINITY {
-            return 1.0 / pt(location, scale, df, ll);
-        } else if ll == NEG_INFINITY && ul == 0.0 {
-            return 1.0 / (1.0 - pt(location, scale, df, 0.0));
-        } else {
-            return 1.0;
-        }
-    } else {
-        if ll == 0.0 && ul == INFINITY {
-            return 1.0 / (1.0 - pt(location, scale, df, ll));
-        } else if ll == NEG_INFINITY && ul == 0.0 {
-            return 1.0 / (pt(location, scale, df, 0.0));
-        } else {
-            return 1.0;
-        }
-    }
-}
-
-#[inline(always)]
-fn pt(_location: f64, _scale: f64, df: f64, q: f64) -> f64 {
-    // let dist = StudentsT::new(location, scale, df).unwrap();
-    // if q >= location {
-    //     return dist.cdf(q);
-    // } else {
-    //     return 1.0 - dist.cdf(q);
-    // }
-    return students_t_cdf(q, df, true, false);
-}
-
-#[inline(always)]
-fn tail_to_bounds(tail: f64) -> (f64, f64) {
-    let (lb, ub) = if tail == 1.0 {
-        (0f64, INFINITY)
-    } else if tail == -1.0 {
-        (NEG_INFINITY, 0f64)
-    } else {
-        (NEG_INFINITY, INFINITY)
-    };
-
-    return (lb, ub);
-}
 
 #[inline(always)]
 pub fn dt(x: f64, df: f64, ncp: f64) -> f64 {
     non_central_t_pdf(x, df, ncp, false)
-}
-
-#[inline(always)]
-fn make_prior(_name: &str, params: Vec<f64>) -> Box<impl Fn(f64) -> f64> {
-    // if name == "normal" {
-    // Box::new(normal_prior(params[0], params[1]))
-    // } else {
-    Box::new(t_prior(
-        params[0], params[1], params[2], params[3], params[4],
-    ))
-    // }
 }
 
 #[inline(always)]
@@ -337,42 +411,6 @@ fn create_predictive(
 ) -> impl Fn(f64) -> f64 {
     move |x: f64| likelihood(x) * prior(x)
 }
-
-// #[inline(always)]
-// fn normal_prior(mean: f64, sd: f64) -> Box<dyn Fn(f64) -> f64> {
-//     let dist = Normal::new(mean, sd).unwrap();
-//     return Box::new(move |x: f64| dist.pdf(x));
-// }
-
-//         // let mut w = rgsl::IntegrationWorkspace::new(10000000).expect("IntegrationWorkspace::new failed");
-//         // let f = |x: f64| predictive(x);
-
-//         // let (_, result2, _) = w.qagi(f,1e-10, 1e-10,10000000);
-//         // let result2 = qagi(f, f64::NEG_INFINITY, f64::INFINITY, 0, 1e-3);
-
-// fn bayesfactor2(mean: f64, sd: f64, n: i32) -> Option<f64> {
-//     let (lb, ub) = tail_to_bounds(0.0);
-//     let d = mean / sd;
-//     // let t = mean / (sd / (n as f64).sqrt());
-//     // if t > 10f64 {
-//     //     return Some(1000.0);
-//     // }
-//     let likelihood = noncentral_d_likelihood(d, n as f64);
-
-//     let null = likelihood(0.0);
-//     // let name = String::from("student_t");
-//     let params = vec![0.0, 2f64.sqrt() / 2f64, 1.0, lb, ub];
-//     // let prior = t_prior_one_tailed(location, scale, df, lb, ub);
-//     let prior = make_prior("student_t", params);
-//     let h1 = create_predictive(likelihood, prior);
-
-//     let mut w = rgsl::IntegrationWorkspace::new(1000000).expect("IntegrationWorkspace::new failed");
-//     let f = |x: f64| h1(x);
-
-//     let (_, alt, _) = w.qagi(f, 1e-9, 1e-9, 100000);
-
-//     return Some(alt / null);
-// }
 
 #[cfg(test)]
 mod tests {
@@ -398,12 +436,11 @@ mod tests {
     fn test1() {
         let alternative = "two.sided";
         let prior = Prior {
-            name: "cauchy".to_string(),
+            family: "Cauchy".to_string(),
             params: vec![0., (2f64).sqrt() / 2.0],
         };
         let got = bf_onesample_default_t(
-            0.508114037354055,
-            1.06850369859537,
+            0.508114037354055 / 1.06850369859537,
             140,
             &prior,
             alternative,
@@ -421,14 +458,13 @@ mod tests {
     #[test]
     fn test2() {
         let prior = Prior {
-            name: "cauchy".to_string(),
+            family: "Cauchy".to_string(),
             params: vec![0., (2f64).sqrt() / 2.0],
         };
         let alternative = "two.sided";
         let want = (304475.15582726168213412166 as f64).ln();
         let got = bf_onesample_default_t(
-            0.508114037354055,
-            1.06850369859537,
+            0.508114037354055 / 1.06850369859537,
             150,
             &prior,
             alternative,
@@ -522,10 +558,3 @@ mod tests {
     }
 }
 
-// fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
-// where
-//     P: AsRef<Path>,
-// {
-//     let file = File::open(filename)?;
-//     Ok(io::BufReader::new(file).lines())
-// }

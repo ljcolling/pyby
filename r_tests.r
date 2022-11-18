@@ -33,3 +33,6 @@ purrr::map2(bfda_data$emp.ES, rust_data$emp.ES, function(x, y) {
 purrr::map2(bfda_data$logBF, rust_data$logBF, function(x, y) {
   testthat::expect_equal(x, y, tolerance = 0.0001)
 })
+
+
+
