@@ -12,7 +12,7 @@ jobs:
     - uses: messense/maturin-action@v1
       with:
         command: build
-        args: --release --sdist -o dist
+        args: --release --no-sdist -o dist
     - name: Upload wheels
       uses: actions/upload-artifact@v2
       with:
